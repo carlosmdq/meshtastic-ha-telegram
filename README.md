@@ -57,7 +57,7 @@ Comando `/mesh` para enviar mensajes desde Telegram a la red Meshtastic:
 
 ```
 /mesh Hola a todos          → canal público
-/mesh @501743372 Hola       → DM a nodo específico
+/mesh @<node_id> Hola       → DM a nodo específico
 ```
 
 ## Setup

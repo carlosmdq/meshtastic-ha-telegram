@@ -1,0 +1,123 @@
+# Automatizaciones Meshtastic para Home Assistant
+# Copiar/adaptar a tu automations.yaml de HA
+#
+# Requisitos:
+#   - Integración Meshtastic (HACS) conectada al nodo via TCP
+#   - rest_command.telegram_notify configurado en configuration.yaml
+#   - Broker MQTT Mosquitto corriendo
+
+# ============================================================
+# MENSAJERÍA — DM y envío via Telegram
+# ============================================================
+
+# Reenvía mensajes directos (DM) recibidos por Meshtastic a Telegram
+- id: 'mesh_dm_a_telegram'
+  alias: "Mesh: DM recibido → Telegram"
+  description: "Reenvía mensajes directos de Meshtastic a Telegram"
+  mode: queued
+  trigger:
+    - platform: event
+      event_type: meshtastic_message_log
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.pki == true }}"
+  action:
+    - action: rest_command.telegram_notify
+      data:
+        title: "📻 DM Meshtastic"
+        message: >-
+          De: {{ trigger.event.data.from_name }}
+          Mensaje: {{ trigger.event.data.message }}
+
+# Recibe webhook del bot de Telegram y envía por Meshtastic
+- id: 'mesh_enviar_desde_telegram'
+  alias: "Mesh: Enviar mensaje desde Telegram (webhook)"
+  description: "Recibe webhook del bot de Telegram y envía por Meshtastic"
+  mode: queued
+  trigger:
+    - platform: webhook
+      webhook_id: mesh_send_from_telegram
+      allowed_methods:
+        - POST
+      local_only: true
+  action:
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.json.to is defined and trigger.json.to }}"
+          sequence:
+            - action: meshtastic.send_text
+              data:
+                text: "{{ trigger.json.message }}"
+                to: "{{ trigger.json.to }}"
+                ack: true
+      default:
+        - action: meshtastic.send_text
+          data:
+            text: "{{ trigger.json.message }}"
+            ack: true
+
+# ============================================================
+# ALERTAS — Estado de nodos
+# ============================================================
+
+# Alerta si el nodo móvil deja de reportar por más de 1 hora
+- id: 'mesh_heltec_offline'
+  alias: "Mesh: Heltec móvil sin reportar"
+  description: "Alerta si el Heltec V3 deja de reportar por más de 1 hora"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: sensor.meshtastic_XXXX_NODEID_node_last_heard
+      to: "unavailable"
+      for:
+        hours: 1
+    - platform: template
+      value_template: >
+        {{ as_timestamp(now()) - as_timestamp(states('sensor.meshtastic_XXXX_NODEID_node_last_heard')) > 3600 }}
+      for:
+        minutes: 5
+  action:
+    - action: rest_command.telegram_notify
+      data:
+        title: "📡 Mesh offline"
+        message: >
+          Nodo móvil sin reportar hace más de 1 hora.
+          Último contacto: {{ states('sensor.meshtastic_XXXX_NODEID_node_last_heard') }}
+          Batería: {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
+
+# Alerta cuando la batería del nodo móvil baja del 20%
+- id: 'mesh_heltec_bateria_baja'
+  alias: "Mesh: Batería baja nodo móvil"
+  description: "Alerta cuando la batería baja del 20%"
+  mode: single
+  trigger:
+    - platform: numeric_state
+      entity_id: sensor.meshtastic_XXXX_NODEID_device_battery_level
+      below: 20
+  action:
+    - action: rest_command.telegram_notify
+      data:
+        title: "🔋 Mesh batería baja"
+        message: >
+          Nodo móvil batería al {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
+          ({{ states('sensor.meshtastic_XXXX_NODEID_device_voltage') }}V)
+
+# Alerta si el gateway pierde conexión
+- id: 'mesh_gateway_desconectado'
+  alias: "Mesh: Gateway desconectado"
+  description: "Alerta si el gateway Meshtastic pierde conexión"
+  mode: single
+  trigger:
+    - platform: state
+      entity_id: meshtastic.gateway_XXXX
+      from: "Connected"
+      for:
+        minutes: 10
+  action:
+    - action: rest_command.telegram_notify
+      data:
+        title: "📡 Gateway Mesh offline"
+        message: >
+          El gateway Meshtastic perdió conexión.
+          Estado: {{ states('meshtastic.gateway_XXXX') }}

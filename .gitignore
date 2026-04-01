@@ -1,0 +1,17 @@
+# Entorno
+.env
+__pycache__/
+*.pyc
+venv/
+
+# Mosquitto data/logs (solo config se versiona)
+mosquitto/data/
+mosquitto/log/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Editor
+.vscode/
+.idea/

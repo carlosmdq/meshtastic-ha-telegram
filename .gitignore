@@ -4,9 +4,11 @@ __pycache__/
 *.pyc
 venv/
 
-# Mosquitto data/logs (solo config se versiona)
+# Mosquitto data/logs/certs/runtime config
 mosquitto/data/
 mosquitto/log/
+mosquitto/certs/
+mosquitto/config/
 
 # OS
 .DS_Store

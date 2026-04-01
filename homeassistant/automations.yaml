@@ -1,105 +1,91 @@
-# Meshtastic automations for Home Assistant
-# Copy/adapt to your automations.yaml
+# Meshtastic automations for Home Assistant (MQTT-based)
+# All automations use MQTT triggers — no TCP integration required.
+# The Meshtastic node publishes to Mosquitto broker, HA subscribes via MQTT integration.
 #
 # Requirements:
-#   - Meshtastic integration (HACS) connected to node via TCP
+#   - MQTT integration in HA connected to Mosquitto broker
 #   - rest_command.telegram_notify configured in configuration.yaml
-#   - Mosquitto MQTT broker running
+#   - Meshtastic node with mqtt.enabled=true, json_enabled=true, uplink/downlink enabled
+#   - Mosquitto broker running (see ../mosquitto/)
+#
+# Architecture:
+#   App (TCP:4403) → XIAO node → MQTT broker ← HA (MQTT integration)
+#   The Meshtastic TCP integration is DISABLED so the app can connect directly.
 
 # ============================================================
-# MESSAGING — Sending via Telegram webhook
+# CHANNEL MESSAGES — Forward to Telegram via MQTT
 # ============================================================
 
-# Receive webhook from Telegram bot and send via Meshtastic
-- id: 'mesh_enviar_desde_telegram'
-  alias: "Mesh: Send message from Telegram (webhook)"
-  description: "Receives webhook from Telegram bot and sends via Meshtastic"
-  mode: queued
-  trigger:
-    - platform: webhook
-      webhook_id: mesh_send_from_telegram
-      allowed_methods:
-        - POST
-      local_only: true
-  action:
-    - choose:
-        - conditions:
-            - condition: template
-              value_template: "{{ trigger.json.to is defined and trigger.json.to }}"
-          sequence:
-            - action: meshtastic.send_text
-              data:
-                text: "{{ trigger.json.message }}"
-                to: "{{ trigger.json.to }}"
-                ack: true
-      default:
-        - action: meshtastic.send_text
-          data:
-            text: "{{ trigger.json.message }}"
-            ack: true
-
-# ============================================================
-# CHANNEL MESSAGES — Forward to Telegram
-# ============================================================
-
-# Forward channel messages (LongFast, private channels, etc.) to Telegram
-# Uses meshtastic_api_text_message which fires for all readable text messages
-- id: 'mesh_canales_a_telegram'
-  alias: "Mesh: channel messages → Telegram"
-  description: "Forward Meshtastic channel messages to Telegram"
+# Forward channel messages to Telegram
+# The XIAO gateway publishes with sender=!1de7ff0c for all relayed messages,
+# so we filter by "from" field (original sender node ID) instead of "sender"
+- id: 'mesh_canales_mqtt_telegram'
+  alias: "Mesh: canales MQTT → Telegram"
+  description: "Forward Meshtastic channel messages via MQTT to Telegram"
   mode: queued
   max: 10
   trigger:
-    - platform: event
-      event_type: meshtastic_api_text_message
+    - platform: mqtt
+      topic: "msh/AR/2/json/LongFast/+"
+    - platform: mqtt
+      topic: "msh/AR/2/json/Limay/+"
+    - platform: mqtt
+      topic: "msh/AR/2/json/BairesMesh/+"
+    - platform: mqtt
+      topic: "msh/AR/2/json/NQNmesh/+"
   condition:
     - condition: template
-      value_template: "{{ trigger.event.data.data.to.channel is not none }}"
+      value_template: >
+        {{ (trigger.payload | from_json).type == "text"
+           and (trigger.payload | from_json).from != YOUR_NODE_ID }}
   action:
     - action: rest_command.telegram_notify
       data:
         title: "📻 Meshtastic"
         message: >-
-          Ch{{ trigger.event.data.data.to.channel }}: {{ trigger.event.data.data.message }}
+          {{ trigger.topic.split("/")[4] }}: {{ (trigger.payload | from_json).payload.text }}
+          (de {{ (trigger.payload | from_json).sender }})
 
 # ============================================================
-# DM DETECTION — Encrypted DMs via meshtastic_api_packet
+# DM DETECTION — via MQTT
 # ============================================================
-#
-# Firmware 2.5+ encrypts DMs with PKI end-to-end. The gateway can't decrypt
-# them, so events like meshtastic_message_log and meshtastic_api_text_message
-# do NOT fire for DMs.
-#
-# Workaround: meshtastic_api_packet fires for ALL packets including encrypted
-# DMs. We detect DMs by checking:
-#   - to == YOUR_NODE_ID (not broadcast)
-#   - encrypted field is present (PKI payload)
-#   - decoded field is absent (not a routing/ack packet)
-#
-# Limitation: we can detect WHO sent a DM but NOT read the message content.
-# See: https://github.com/meshtastic/firmware/issues/5000
 
-# Notify Telegram + flash light when an encrypted DM is received
-- id: 'mesh_dm_notify_and_flash'
-  alias: "Mesh: DM received → Telegram + 3 blue flashes"
-  description: "On encrypted DM received, notify Telegram and flash smart light"
-  mode: single
+# DM text messages via MQTT JSON (if decryptable)
+- id: 'mesh_dm_mqtt_telegram'
+  alias: "Mesh: DM via MQTT → Telegram"
+  description: "Detect DMs via MQTT JSON and notify Telegram"
+  mode: queued
+  max: 5
   trigger:
-    - platform: event
-      event_type: meshtastic_api_packet
+    - platform: mqtt
+      topic: "msh/AR/2/json/+/!YOUR_NODE_HEX"
   condition:
     - condition: template
       value_template: >
-        {{ trigger.event.data.data.to == YOUR_NODE_ID
-           and trigger.event.data.data.encrypted is defined
-           and trigger.event.data.data.decoded is not defined }}
+        {{ (trigger.payload | from_json).type == "text"
+           and (trigger.payload | from_json).to == YOUR_NODE_ID }}
   action:
-    # Notify Telegram (can't read message content, only sender)
+    - action: rest_command.telegram_notify
+      data:
+        title: "📻 DM Meshtastic (MQTT)"
+        message: >-
+          DM de {{ (trigger.payload | from_json).sender }}:
+          {{ (trigger.payload | from_json).payload.text | default("(encrypted)") }}
+
+# DM PKI encrypted — detect arrival + flash light
+- id: 'mesh_dm_destello_mqtt'
+  alias: "Mesh: DM received (MQTT) → flash + Telegram"
+  description: "PKI DM detected via MQTT → 3 blue flashes + Telegram notification"
+  mode: single
+  trigger:
+    - platform: mqtt
+      topic: "msh/AR/2/e/PKI/+"
+  action:
     - action: rest_command.telegram_notify
       data:
         title: "📻 DM Meshtastic"
         message: >-
-          DM from {{ states("sensor.meshtastic_XXXX_" ~ trigger.event.data.data.from | string ~ "_node_long_name") | default("node " ~ trigger.event.data.data.from) }} (encrypted)
+          DM received from {{ trigger.topic.split("/")[-1] }} (encrypted PKI)
     # Save current light state
     - action: scene.create
       data:
@@ -154,66 +140,101 @@
         entity_id: scene.mesh_light_backup
 
 # ============================================================
-# ALERTS — Node status monitoring
+# CHANNEL ALERTS — Visual notification for private channel
 # ============================================================
 
-# Alert if mobile node stops reporting for more than 1 hour
-- id: 'mesh_node_offline'
-  alias: "Mesh: Mobile node not reporting"
-  description: "Alert if mobile node stops reporting for more than 1 hour"
+# Flash light on private channel message (e.g., "Limay")
+- id: 'mesh_limay_destello_mqtt'
+  alias: "Mesh: private channel (MQTT) → 3 blue flashes"
+  description: "Flash light on private channel message via MQTT"
   mode: single
   trigger:
-    - platform: state
-      entity_id: sensor.meshtastic_XXXX_NODEID_node_last_heard
-      to: "unavailable"
-      for:
-        hours: 1
-    - platform: template
+    - platform: mqtt
+      topic: "msh/AR/2/json/Limay/+"
+  condition:
+    - condition: template
       value_template: >
-        {{ as_timestamp(now()) - as_timestamp(states('sensor.meshtastic_XXXX_NODEID_node_last_heard')) > 3600 }}
-      for:
-        minutes: 5
+        {{ (trigger.payload | from_json).type == "text"
+           and (trigger.payload | from_json).from != YOUR_NODE_ID }}
   action:
-    - action: rest_command.telegram_notify
+    - action: scene.create
       data:
-        title: "📡 Mesh offline"
-        message: >
-          Mobile node not reporting for more than 1 hour.
-          Last contact: {{ states('sensor.meshtastic_XXXX_NODEID_node_last_heard') }}
-          Battery: {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
+        scene_id: mesh_light_backup
+        snapshot_entities:
+          - light.YOUR_LIGHT_ENTITY
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 500
+    - action: scene.turn_on
+      target:
+        entity_id: scene.mesh_light_backup
 
-# Alert when mobile node battery drops below 20%
-- id: 'mesh_node_low_battery'
-  alias: "Mesh: Low battery mobile node"
-  description: "Alert when battery drops below 20%"
-  mode: single
-  trigger:
-    - platform: numeric_state
-      entity_id: sensor.meshtastic_XXXX_NODEID_device_battery_level
-      below: 20
-  action:
-    - action: rest_command.telegram_notify
-      data:
-        title: "🔋 Mesh low battery"
-        message: >
-          Mobile node battery at {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
-          ({{ states('sensor.meshtastic_XXXX_NODEID_device_voltage') }}V)
+# ============================================================
+# MESSAGING — Send from Telegram via MQTT
+# ============================================================
 
-# Alert if gateway loses connection
-- id: 'mesh_gateway_disconnected'
-  alias: "Mesh: Gateway disconnected"
-  description: "Alert if Meshtastic gateway loses connection"
-  mode: single
+# Receive webhook from Telegram bot and publish to MQTT
+- id: 'mesh_enviar_desde_telegram_mqtt'
+  alias: "Mesh: Send from Telegram via MQTT"
+  description: "Receives webhook from Telegram bot and publishes to MQTT"
+  mode: queued
+  max: 5
   trigger:
-    - platform: state
-      entity_id: meshtastic.gateway_XXXX
-      from: "Connected"
-      for:
-        minutes: 10
+    - platform: webhook
+      webhook_id: mesh_send_from_telegram
+      allowed_methods:
+        - POST
+      local_only: true
   action:
-    - action: rest_command.telegram_notify
-      data:
-        title: "📡 Mesh gateway offline"
-        message: >
-          Meshtastic gateway lost connection.
-          Status: {{ states('meshtastic.gateway_XXXX') }}
+    - choose:
+        - conditions:
+            - condition: template
+              value_template: "{{ trigger.json.channel is defined and trigger.json.channel }}"
+          sequence:
+            - action: mqtt.publish
+              data:
+                topic: "msh/AR/2/json/{{ trigger.json.channel }}/!YOUR_NODE_HEX"
+                payload: >
+                  {{ {"from": YOUR_NODE_ID, "type": "sendtext", "payload": trigger.json.message} | to_json }}
+      default:
+        - action: mqtt.publish
+          data:
+            topic: "msh/AR/2/json/LongFast/!YOUR_NODE_HEX"
+            payload: >
+              {{ {"from": YOUR_NODE_ID, "type": "sendtext", "payload": trigger.json.message} | to_json }}

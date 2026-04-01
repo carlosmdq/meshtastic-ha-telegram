@@ -7,27 +7,8 @@
 #   - Mosquitto MQTT broker running
 
 # ============================================================
-# MESSAGING — DM forwarding and sending via Telegram
+# MESSAGING — Sending via Telegram webhook
 # ============================================================
-
-# Forward direct messages (DM) received via Meshtastic to Telegram
-- id: 'mesh_dm_a_telegram'
-  alias: "Mesh: DM received → Telegram"
-  description: "Forwards Meshtastic direct messages to Telegram"
-  mode: queued
-  trigger:
-    - platform: event
-      event_type: meshtastic_message_log
-  condition:
-    - condition: template
-      value_template: "{{ trigger.event.data.pki == true }}"
-  action:
-    - action: rest_command.telegram_notify
-      data:
-        title: "📻 DM Meshtastic"
-        message: >-
-          From: {{ trigger.event.data.from_name }}
-          Message: {{ trigger.event.data.message }}
 
 # Receive webhook from Telegram bot and send via Meshtastic
 - id: 'mesh_enviar_desde_telegram'
@@ -58,11 +39,126 @@
             ack: true
 
 # ============================================================
+# CHANNEL MESSAGES — Forward to Telegram
+# ============================================================
+
+# Forward channel messages (LongFast, private channels, etc.) to Telegram
+# Uses meshtastic_api_text_message which fires for all readable text messages
+- id: 'mesh_canales_a_telegram'
+  alias: "Mesh: channel messages → Telegram"
+  description: "Forward Meshtastic channel messages to Telegram"
+  mode: queued
+  max: 10
+  trigger:
+    - platform: event
+      event_type: meshtastic_api_text_message
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.data.to.channel is not none }}"
+  action:
+    - action: rest_command.telegram_notify
+      data:
+        title: "📻 Meshtastic"
+        message: >-
+          Ch{{ trigger.event.data.data.to.channel }}: {{ trigger.event.data.data.message }}
+
+# ============================================================
+# DM DETECTION — Encrypted DMs via meshtastic_api_packet
+# ============================================================
+#
+# Firmware 2.5+ encrypts DMs with PKI end-to-end. The gateway can't decrypt
+# them, so events like meshtastic_message_log and meshtastic_api_text_message
+# do NOT fire for DMs.
+#
+# Workaround: meshtastic_api_packet fires for ALL packets including encrypted
+# DMs. We detect DMs by checking:
+#   - to == YOUR_NODE_ID (not broadcast)
+#   - encrypted field is present (PKI payload)
+#   - decoded field is absent (not a routing/ack packet)
+#
+# Limitation: we can detect WHO sent a DM but NOT read the message content.
+# See: https://github.com/meshtastic/firmware/issues/5000
+
+# Notify Telegram + flash light when an encrypted DM is received
+- id: 'mesh_dm_notify_and_flash'
+  alias: "Mesh: DM received → Telegram + 3 blue flashes"
+  description: "On encrypted DM received, notify Telegram and flash smart light"
+  mode: single
+  trigger:
+    - platform: event
+      event_type: meshtastic_api_packet
+  condition:
+    - condition: template
+      value_template: >
+        {{ trigger.event.data.data.to == YOUR_NODE_ID
+           and trigger.event.data.data.encrypted is defined
+           and trigger.event.data.data.decoded is not defined }}
+  action:
+    # Notify Telegram (can't read message content, only sender)
+    - action: rest_command.telegram_notify
+      data:
+        title: "📻 DM Meshtastic"
+        message: >-
+          DM from {{ states("sensor.meshtastic_XXXX_" ~ trigger.event.data.data.from | string ~ "_node_long_name") | default("node " ~ trigger.event.data.data.from) }} (encrypted)
+    # Save current light state
+    - action: scene.create
+      data:
+        scene_id: mesh_light_backup
+        snapshot_entities:
+          - light.YOUR_LIGHT_ENTITY  # Replace with your RGB light entity_id
+    # Flash 1
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    # Flash 2
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    # Flash 3
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 500
+    # Restore previous state
+    - action: scene.turn_on
+      target:
+        entity_id: scene.mesh_light_backup
+
+# ============================================================
 # ALERTS — Node status monitoring
 # ============================================================
 
 # Alert if mobile node stops reporting for more than 1 hour
-- id: 'mesh_heltec_offline'
+- id: 'mesh_node_offline'
   alias: "Mesh: Mobile node not reporting"
   description: "Alert if mobile node stops reporting for more than 1 hour"
   mode: single
@@ -87,7 +183,7 @@
           Battery: {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
 
 # Alert when mobile node battery drops below 20%
-- id: 'mesh_heltec_bateria_baja'
+- id: 'mesh_node_low_battery'
   alias: "Mesh: Low battery mobile node"
   description: "Alert when battery drops below 20%"
   mode: single
@@ -104,7 +200,7 @@
           ({{ states('sensor.meshtastic_XXXX_NODEID_device_voltage') }}V)
 
 # Alert if gateway loses connection
-- id: 'mesh_gateway_desconectado'
+- id: 'mesh_gateway_disconnected'
   alias: "Mesh: Gateway disconnected"
   description: "Alert if Meshtastic gateway loses connection"
   mode: single
@@ -121,167 +217,3 @@
         message: >
           Meshtastic gateway lost connection.
           Status: {{ states('meshtastic.gateway_XXXX') }}
-
-# ============================================================
-# VISUAL INDICATOR — Blue flash on Meshtastic DM received
-# ============================================================
-
-# 3 blue flashes on a smart light when a DM is received
-# Saves and restores the light's previous state
-- id: 'mesh_dm_destello_azul'
-  alias: "Mesh: DM received → 3 blue flashes"
-  description: "On Meshtastic DM received, flash a smart light blue 3 times then restore previous state"
-  mode: single
-  trigger:
-    - platform: event
-      event_type: meshtastic_message_log
-  condition:
-    - condition: template
-      value_template: "{{ trigger.event.data.pki == true }}"
-  action:
-    # Save current light state
-    - action: scene.create
-      data:
-        scene_id: mesh_light_backup
-        snapshot_entities:
-          - light.YOUR_LIGHT_ENTITY  # Replace with your light entity_id
-    # Flash 1
-    - action: light.turn_on
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-      data:
-        hs_color: [240, 100]
-        brightness: 255
-    - delay:
-        milliseconds: 500
-    - action: light.turn_off
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-    - delay:
-        milliseconds: 300
-    # Flash 2
-    - action: light.turn_on
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-      data:
-        hs_color: [240, 100]
-        brightness: 255
-    - delay:
-        milliseconds: 500
-    - action: light.turn_off
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-    - delay:
-        milliseconds: 300
-    # Flash 3
-    - action: light.turn_on
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-      data:
-        hs_color: [240, 100]
-        brightness: 255
-    - delay:
-        milliseconds: 500
-    - action: light.turn_off
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-    - delay:
-        milliseconds: 500
-    # Restore previous state
-    - action: scene.turn_on
-      target:
-        entity_id: scene.mesh_light_backup
-
-# ============================================================
-# VISUAL INDICATOR — Blue flash on private channel message
-# ============================================================
-
-# 3 blue flashes when a message arrives on a private channel (e.g., Limay)
-# Uses meshtastic_api_text_message event filtered by channel index
-# Detect DMs via meshtastic_api_packet: PKI-encrypted DMs have "encrypted" field
-# and "to" set to the gateway node ID (not broadcast)
-- id: 'mesh_dm_destello_final'
-  alias: "Mesh: DM received → 3 blue flashes"
-  description: "On encrypted DM received, flash a smart light blue 3 times"
-  mode: single
-  trigger:
-    - platform: event
-      event_type: meshtastic_api_packet
-  condition:
-    - condition: template
-      value_template: >
-        {{ trigger.event.data.data.to == YOUR_NODE_ID
-           and trigger.event.data.data.encrypted is defined
-           and trigger.event.data.data.decoded is not defined }}
-  action:
-    # Save current light state
-    - action: scene.create
-      data:
-        scene_id: mesh_light_backup
-        snapshot_entities:
-          - light.YOUR_LIGHT_ENTITY
-    # Flash 1
-    - action: light.turn_on
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-      data:
-        hs_color: [240, 100]
-        brightness: 255
-    - delay:
-        milliseconds: 500
-    - action: light.turn_off
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-    - delay:
-        milliseconds: 300
-    # Flash 2
-    - action: light.turn_on
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-      data:
-        hs_color: [240, 100]
-        brightness: 255
-    - delay:
-        milliseconds: 500
-    - action: light.turn_off
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-    - delay:
-        milliseconds: 300
-    # Flash 3
-    - action: light.turn_on
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-      data:
-        hs_color: [240, 100]
-        brightness: 255
-    - delay:
-        milliseconds: 500
-    - action: light.turn_off
-      target:
-        entity_id: light.YOUR_LIGHT_ENTITY
-    - delay:
-        milliseconds: 500
-    # Restore previous state
-    - action: scene.turn_on
-      target:
-        entity_id: scene.mesh_light_backup
-
-# Forward channel messages to Telegram
-- id: 'mesh_canales_a_telegram'
-  alias: "Mesh: channel messages → Telegram"
-  description: "Forward selected Meshtastic channel messages to Telegram"
-  mode: queued
-  max: 10
-  trigger:
-    - platform: event
-      event_type: meshtastic_api_text_message
-  condition:
-    - condition: template
-      value_template: "{{ trigger.event.data.data.to.channel is not none }}"
-  action:
-    - action: rest_command.telegram_notify
-      data:
-        title: "📻 Meshtastic"
-        message: >-
-          Ch{{ trigger.event.data.data.to.channel }}: {{ trigger.event.data.data.message }}

@@ -31,15 +31,18 @@ Telegram Bot:
 
 ### Home Assistant (`homeassistant/`)
 
-5 ready-to-use YAML automations for your `automations.yaml`:
+6 ready-to-use YAML automations for your `automations.yaml`:
 
 | Automation | Function |
 |-----------|----------|
-| `mesh_dm_a_telegram` | Forwards Meshtastic DMs to Telegram |
 | `mesh_enviar_desde_telegram` | Webhook that receives from Telegram and sends via Meshtastic |
-| `mesh_heltec_offline` | Alert if a node stops reporting (>1h) |
-| `mesh_heltec_bateria_baja` | Alert when battery <20% |
-| `mesh_gateway_desconectado` | Alert if gateway loses connection (>10min) |
+| `mesh_canales_a_telegram` | Forward channel messages to Telegram |
+| `mesh_dm_notify_and_flash` | DM received → Telegram notification + 3 blue flashes on smart light |
+| `mesh_node_offline` | Alert if a node stops reporting (>1h) |
+| `mesh_node_low_battery` | Alert when battery <20% |
+| `mesh_gateway_disconnected` | Alert if gateway loses connection (>10min) |
+
+> **Note:** Firmware 2.5+ encrypts DMs with PKI end-to-end. The DM automation detects arrival and sender but cannot read the message content. Channel messages are forwarded with full text. See [Issue #4](https://github.com/carlosmdq/meshtastic-ha-telegram/issues/4) for details.
 
 **HA Requirements:**
 - [Meshtastic Integration](https://github.com/meshtastic/homeassistant) (HACS)

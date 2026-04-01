@@ -198,24 +198,28 @@
 
 # 3 blue flashes when a message arrives on a private channel (e.g., Limay)
 # Uses meshtastic_api_text_message event filtered by channel index
-# Note: DMs with PKI encryption do NOT fire events in HA (firmware 2.5+ limitation)
-- id: 'mesh_limay_destello_azul'
-  alias: "Mesh: private channel message → 3 blue flashes"
-  description: "On message received on private channel, flash a smart light blue 3 times"
+# Detect DMs via meshtastic_api_packet: PKI-encrypted DMs have "encrypted" field
+# and "to" set to the gateway node ID (not broadcast)
+- id: 'mesh_dm_destello_final'
+  alias: "Mesh: DM received → 3 blue flashes"
+  description: "On encrypted DM received, flash a smart light blue 3 times"
   mode: single
   trigger:
     - platform: event
-      event_type: meshtastic_api_text_message
+      event_type: meshtastic_api_packet
   condition:
     - condition: template
-      value_template: "{{ trigger.event.data.data.to.channel == 1 }}"  # Channel index 1 = Limay
+      value_template: >
+        {{ trigger.event.data.data.to == YOUR_NODE_ID
+           and trigger.event.data.data.encrypted is defined
+           and trigger.event.data.data.decoded is not defined }}
   action:
     # Save current light state
     - action: scene.create
       data:
         scene_id: mesh_light_backup
         snapshot_entities:
-          - light.YOUR_LIGHT_ENTITY  # Replace with your light entity_id
+          - light.YOUR_LIGHT_ENTITY
     # Flash 1
     - action: light.turn_on
       target:
@@ -262,3 +266,22 @@
     - action: scene.turn_on
       target:
         entity_id: scene.mesh_light_backup
+
+# Forward channel messages to Telegram
+- id: 'mesh_canales_a_telegram'
+  alias: "Mesh: channel messages → Telegram"
+  description: "Forward selected Meshtastic channel messages to Telegram"
+  mode: queued
+  max: 10
+  trigger:
+    - platform: event
+      event_type: meshtastic_api_text_message
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.data.to.channel is not none }}"
+  action:
+    - action: rest_command.telegram_notify
+      data:
+        title: "📻 Meshtastic"
+        message: >-
+          Ch{{ trigger.event.data.data.to.channel }}: {{ trigger.event.data.data.message }}

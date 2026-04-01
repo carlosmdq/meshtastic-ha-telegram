@@ -17,7 +17,7 @@
 # ============================================================
 
 # Forward channel messages to Telegram
-# The XIAO gateway publishes with sender=!1de7ff0c for all relayed messages,
+# The gateway node publishes with its own sender ID for all relayed messages,
 # so we filter by "from" field (original sender node ID) instead of "sender"
 - id: 'mesh_canales_mqtt_telegram'
   alias: "Mesh: canales MQTT → Telegram"

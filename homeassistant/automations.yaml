@@ -191,3 +191,74 @@
     - action: scene.turn_on
       target:
         entity_id: scene.mesh_light_backup
+
+# ============================================================
+# VISUAL INDICATOR — Blue flash on private channel message
+# ============================================================
+
+# 3 blue flashes when a message arrives on a private channel (e.g., Limay)
+# Uses meshtastic_api_text_message event filtered by channel index
+# Note: DMs with PKI encryption do NOT fire events in HA (firmware 2.5+ limitation)
+- id: 'mesh_limay_destello_azul'
+  alias: "Mesh: private channel message → 3 blue flashes"
+  description: "On message received on private channel, flash a smart light blue 3 times"
+  mode: single
+  trigger:
+    - platform: event
+      event_type: meshtastic_api_text_message
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.data.to.channel == 1 }}"  # Channel index 1 = Limay
+  action:
+    # Save current light state
+    - action: scene.create
+      data:
+        scene_id: mesh_light_backup
+        snapshot_entities:
+          - light.YOUR_LIGHT_ENTITY  # Replace with your light entity_id
+    # Flash 1
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    # Flash 2
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    # Flash 3
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 500
+    # Restore previous state
+    - action: scene.turn_on
+      target:
+        entity_id: scene.mesh_light_backup

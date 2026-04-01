@@ -121,3 +121,73 @@
         message: >
           Meshtastic gateway lost connection.
           Status: {{ states('meshtastic.gateway_XXXX') }}
+
+# ============================================================
+# VISUAL INDICATOR — Blue flash on Meshtastic DM received
+# ============================================================
+
+# 3 blue flashes on a smart light when a DM is received
+# Saves and restores the light's previous state
+- id: 'mesh_dm_destello_azul'
+  alias: "Mesh: DM received → 3 blue flashes"
+  description: "On Meshtastic DM received, flash a smart light blue 3 times then restore previous state"
+  mode: single
+  trigger:
+    - platform: event
+      event_type: meshtastic_message_log
+  condition:
+    - condition: template
+      value_template: "{{ trigger.event.data.pki == true }}"
+  action:
+    # Save current light state
+    - action: scene.create
+      data:
+        scene_id: mesh_light_backup
+        snapshot_entities:
+          - light.YOUR_LIGHT_ENTITY  # Replace with your light entity_id
+    # Flash 1
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    # Flash 2
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 300
+    # Flash 3
+    - action: light.turn_on
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+      data:
+        hs_color: [240, 100]
+        brightness: 255
+    - delay:
+        milliseconds: 500
+    - action: light.turn_off
+      target:
+        entity_id: light.YOUR_LIGHT_ENTITY
+    - delay:
+        milliseconds: 500
+    # Restore previous state
+    - action: scene.turn_on
+      target:
+        entity_id: scene.mesh_light_backup

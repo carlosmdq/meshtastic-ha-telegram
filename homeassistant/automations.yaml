@@ -1,19 +1,19 @@
-# Automatizaciones Meshtastic para Home Assistant
-# Copiar/adaptar a tu automations.yaml de HA
+# Meshtastic automations for Home Assistant
+# Copy/adapt to your automations.yaml
 #
-# Requisitos:
-#   - Integración Meshtastic (HACS) conectada al nodo via TCP
-#   - rest_command.telegram_notify configurado en configuration.yaml
-#   - Broker MQTT Mosquitto corriendo
+# Requirements:
+#   - Meshtastic integration (HACS) connected to node via TCP
+#   - rest_command.telegram_notify configured in configuration.yaml
+#   - Mosquitto MQTT broker running
 
 # ============================================================
-# MENSAJERÍA — DM y envío via Telegram
+# MESSAGING — DM forwarding and sending via Telegram
 # ============================================================
 
-# Reenvía mensajes directos (DM) recibidos por Meshtastic a Telegram
+# Forward direct messages (DM) received via Meshtastic to Telegram
 - id: 'mesh_dm_a_telegram'
-  alias: "Mesh: DM recibido → Telegram"
-  description: "Reenvía mensajes directos de Meshtastic a Telegram"
+  alias: "Mesh: DM received → Telegram"
+  description: "Forwards Meshtastic direct messages to Telegram"
   mode: queued
   trigger:
     - platform: event
@@ -26,13 +26,13 @@
       data:
         title: "📻 DM Meshtastic"
         message: >-
-          De: {{ trigger.event.data.from_name }}
-          Mensaje: {{ trigger.event.data.message }}
+          From: {{ trigger.event.data.from_name }}
+          Message: {{ trigger.event.data.message }}
 
-# Recibe webhook del bot de Telegram y envía por Meshtastic
+# Receive webhook from Telegram bot and send via Meshtastic
 - id: 'mesh_enviar_desde_telegram'
-  alias: "Mesh: Enviar mensaje desde Telegram (webhook)"
-  description: "Recibe webhook del bot de Telegram y envía por Meshtastic"
+  alias: "Mesh: Send message from Telegram (webhook)"
+  description: "Receives webhook from Telegram bot and sends via Meshtastic"
   mode: queued
   trigger:
     - platform: webhook
@@ -58,13 +58,13 @@
             ack: true
 
 # ============================================================
-# ALERTAS — Estado de nodos
+# ALERTS — Node status monitoring
 # ============================================================
 
-# Alerta si el nodo móvil deja de reportar por más de 1 hora
+# Alert if mobile node stops reporting for more than 1 hour
 - id: 'mesh_heltec_offline'
-  alias: "Mesh: Heltec móvil sin reportar"
-  description: "Alerta si el Heltec V3 deja de reportar por más de 1 hora"
+  alias: "Mesh: Mobile node not reporting"
+  description: "Alert if mobile node stops reporting for more than 1 hour"
   mode: single
   trigger:
     - platform: state
@@ -82,14 +82,14 @@
       data:
         title: "📡 Mesh offline"
         message: >
-          Nodo móvil sin reportar hace más de 1 hora.
-          Último contacto: {{ states('sensor.meshtastic_XXXX_NODEID_node_last_heard') }}
-          Batería: {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
+          Mobile node not reporting for more than 1 hour.
+          Last contact: {{ states('sensor.meshtastic_XXXX_NODEID_node_last_heard') }}
+          Battery: {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
 
-# Alerta cuando la batería del nodo móvil baja del 20%
+# Alert when mobile node battery drops below 20%
 - id: 'mesh_heltec_bateria_baja'
-  alias: "Mesh: Batería baja nodo móvil"
-  description: "Alerta cuando la batería baja del 20%"
+  alias: "Mesh: Low battery mobile node"
+  description: "Alert when battery drops below 20%"
   mode: single
   trigger:
     - platform: numeric_state
@@ -98,15 +98,15 @@
   action:
     - action: rest_command.telegram_notify
       data:
-        title: "🔋 Mesh batería baja"
+        title: "🔋 Mesh low battery"
         message: >
-          Nodo móvil batería al {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
+          Mobile node battery at {{ states('sensor.meshtastic_XXXX_NODEID_device_battery_level') }}%
           ({{ states('sensor.meshtastic_XXXX_NODEID_device_voltage') }}V)
 
-# Alerta si el gateway pierde conexión
+# Alert if gateway loses connection
 - id: 'mesh_gateway_desconectado'
-  alias: "Mesh: Gateway desconectado"
-  description: "Alerta si el gateway Meshtastic pierde conexión"
+  alias: "Mesh: Gateway disconnected"
+  description: "Alert if Meshtastic gateway loses connection"
   mode: single
   trigger:
     - platform: state
@@ -117,7 +117,7 @@
   action:
     - action: rest_command.telegram_notify
       data:
-        title: "📡 Gateway Mesh offline"
+        title: "📡 Mesh gateway offline"
         message: >
-          El gateway Meshtastic perdió conexión.
-          Estado: {{ states('meshtastic.gateway_XXXX') }}
+          Meshtastic gateway lost connection.
+          Status: {{ states('meshtastic.gateway_XXXX') }}

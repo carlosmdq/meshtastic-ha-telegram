@@ -1,28 +1,28 @@
 """
-Comando /mesh para bot de Telegram — envía mensajes por Meshtastic via Home Assistant.
+/mesh command for Telegram bot — sends messages via Meshtastic through Home Assistant.
 
-Uso:
-    /mesh Hola a todos          → canal público
-    /mesh @node_id Hola         → DM a nodo específico
+Usage:
+    /mesh Hello everyone        → public channel
+    /mesh @node_id Hello        → DM to specific node
 
-Requisitos:
-    - Home Assistant con automatización 'mesh_enviar_desde_telegram' (webhook)
-    - Bot de Telegram con python-telegram-bot o aiohttp
+Requirements:
+    - Home Assistant with 'mesh_enviar_desde_telegram' automation (webhook)
+    - Telegram bot with python-telegram-bot or aiohttp
     - requests
 
-Integración:
-    Este código se integra en el handler de comandos del bot.
-    La URL del webhook apunta a HA en la misma red local.
+Integration:
+    This code integrates into your bot's command handler.
+    The webhook URL points to HA on the same local network.
 """
 
 import requests
 
-# Ajustar a la IP:puerto de tu Home Assistant
+# Adjust to your Home Assistant IP:port
 HA_WEBHOOK_URL = "http://127.0.0.1:8123/api/webhook/mesh_send_from_telegram"
 
 
 def mesh_send_message(text: str, to: str = None) -> dict:
-    """Envía mensaje por Meshtastic via webhook de HA (sin auth requerido)."""
+    """Send a message via Meshtastic through HA webhook (no auth required)."""
     try:
         payload = {"message": text}
         if to:
@@ -35,34 +35,34 @@ def mesh_send_message(text: str, to: str = None) -> dict:
 
 def handle_mesh_command(text: str) -> dict:
     """
-    Parsea el comando /mesh y envía el mensaje.
+    Parse the /mesh command and send the message.
 
     Args:
-        text: texto después de '/mesh ', ej: "Hola" o "@12345 Hola"
+        text: text after '/mesh ', e.g.: "Hello" or "@12345 Hello"
 
     Returns:
-        dict con resultado: {"ok": bool, "dest": str, "message": str}
+        dict with result: {"ok": bool, "dest": str, "message": str}
     """
     if not text.strip():
         return {
             "ok": False,
-            "error": "Uso: /mesh texto  |  /mesh @node_id texto"
+            "error": "Usage: /mesh text  |  /mesh @node_id text"
         }
 
     msg_text = text.strip()
     to_node = None
 
-    # Si empieza con @ es DM a un nodo específico
+    # If starts with @ it's a DM to a specific node
     if msg_text.startswith("@"):
         parts = msg_text.split(maxsplit=1)
-        to_node = parts[0][1:]  # quitar @
+        to_node = parts[0][1:]  # remove @
         msg_text = parts[1] if len(parts) > 1 else ""
 
     if not msg_text:
-        return {"ok": False, "error": "Falta el mensaje a enviar"}
+        return {"ok": False, "error": "Missing message text"}
 
     result = mesh_send_message(msg_text, to=to_node)
-    dest = f"DM a {to_node}" if to_node else "Canal público"
+    dest = f"DM to {to_node}" if to_node else "Public channel"
 
     return {
         "ok": result.get("ok", False),

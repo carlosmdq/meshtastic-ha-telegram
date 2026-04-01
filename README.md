@@ -1,63 +1,66 @@
 # Meshtastic + Home Assistant + Telegram
 
-Integración completa de una red Meshtastic con Home Assistant y Telegram para monitoreo, mensajería bidireccional y alertas automáticas.
+[![en](https://img.shields.io/badge/lang-en-blue.svg)](README.md)
+[![es](https://img.shields.io/badge/lang-es-red.svg)](README.es.md)
 
-## Arquitectura
+Full integration of a Meshtastic mesh network with Home Assistant and a Telegram bot for monitoring, two-way messaging, and automated alerts.
+
+## Architecture
 
 ```
 Meshtastic Node (TCP :4403)
-    ├── TCP directo → Home Assistant (integración nativa HACS)
-    │                  ├── Eventos meshtastic_message_log
-    │                  └── Acción meshtastic.send_text
+    ├── TCP direct → Home Assistant (native HACS integration)
+    │                  ├── meshtastic_message_log events
+    │                  └── meshtastic.send_text action
     │
     └── MQTT (JSON) → Mosquitto (:1883)
-                       └── Home Assistant (integración MQTT)
+                       └── Home Assistant (MQTT integration)
 
 Home Assistant Automations:
-    ├── DM recibido → Telegram (notificación)
-    ├── Webhook ← Telegram bot → Meshtastic (envío)
-    ├── Nodo offline → alerta Telegram
-    ├── Batería baja → alerta Telegram
-    └── Gateway desconectado → alerta Telegram
+    ├── DM received → Telegram (notification)
+    ├── Webhook ← Telegram bot → Meshtastic (send)
+    ├── Node offline → Telegram alert
+    ├── Low battery → Telegram alert
+    └── Gateway disconnected → Telegram alert
 
 Telegram Bot:
-    └── /mesh comando → webhook HA → meshtastic.send_text
+    └── /mesh command → webhook HA → meshtastic.send_text
 ```
 
-## Componentes
+## Components
 
 ### Home Assistant (`homeassistant/`)
 
-5 automatizaciones YAML listas para copiar a tu `automations.yaml`:
+5 ready-to-use YAML automations for your `automations.yaml`:
 
-| Automatización | Función |
-|---------------|---------|
-| `mesh_dm_a_telegram` | Reenvía DMs de Meshtastic a Telegram |
-| `mesh_enviar_desde_telegram` | Webhook que recibe de Telegram y envía por Meshtastic |
-| `mesh_heltec_offline` | Alerta si un nodo deja de reportar (>1h) |
-| `mesh_heltec_bateria_baja` | Alerta batería <20% |
-| `mesh_gateway_desconectado` | Alerta si el gateway pierde conexión (>10min) |
+| Automation | Function |
+|-----------|----------|
+| `mesh_dm_a_telegram` | Forwards Meshtastic DMs to Telegram |
+| `mesh_enviar_desde_telegram` | Webhook that receives from Telegram and sends via Meshtastic |
+| `mesh_heltec_offline` | Alert if a node stops reporting (>1h) |
+| `mesh_heltec_bateria_baja` | Alert when battery <20% |
+| `mesh_gateway_desconectado` | Alert if gateway loses connection (>10min) |
 
-**Requisitos HA:**
-- [Integración Meshtastic](https://github.com/meshtastic/homeassistant) (HACS)
-- `rest_command.telegram_notify` configurado (ver abajo)
+**HA Requirements:**
+- [Meshtastic Integration](https://github.com/meshtastic/homeassistant) (HACS)
+- `rest_command.telegram_notify` configured (see below)
 
 ### Mosquitto MQTT (`mosquitto/`)
 
-Broker MQTT local con Docker Compose. El nodo Meshtastic publica mensajes JSON aquí.
+Local MQTT broker with Docker Compose. The Meshtastic node publishes JSON messages here.
 
 ```bash
 cd mosquitto
 docker compose up -d
 ```
 
-### Bot Telegram (`telegram-bot/`)
+### Telegram Bot (`telegram-bot/`)
 
-Comando `/mesh` para enviar mensajes desde Telegram a la red Meshtastic:
+`/mesh` command to send messages from Telegram to the Meshtastic network:
 
 ```
-/mesh Hola a todos          → canal público
-/mesh @<node_id> Hola       → DM a nodo específico
+/mesh Hello everyone          → public channel
+/mesh @<node_id> Hello        → DM to specific node
 ```
 
 ## Setup
@@ -69,54 +72,58 @@ cd mosquitto
 docker compose up -d
 ```
 
-### 2. Configurar nodo Meshtastic
+### 2. Configure Meshtastic Node
 
-Apuntar MQTT del nodo al broker local:
+Point the node's MQTT to your local broker:
 
 ```bash
-# Con meshtastic CLI
+# Using meshtastic CLI
 pip install meshtastic
-meshtastic --host <IP_NODO> --set mqtt.address <IP_MOSQUITTO>
-meshtastic --host <IP_NODO> --set mqtt.json true
-meshtastic --host <IP_NODO> --set mqtt.encryption_enabled false
+meshtastic --host <NODE_IP> --set mqtt.address <MOSQUITTO_IP>
+meshtastic --host <NODE_IP> --set mqtt.json true
+meshtastic --host <NODE_IP> --set mqtt.encryption_enabled false
 ```
 
-O desde la app Meshtastic: Module Settings → MQTT → configurar dirección del broker.
+Or from the Meshtastic app: Module Settings → MQTT → set broker address.
 
 ### 3. Home Assistant
 
-1. Instalar integración Meshtastic via HACS
-2. Configurar conexión TCP al nodo (IP:4403)
-3. Agregar `rest_command` en `configuration.yaml`:
+1. Install Meshtastic integration via HACS
+2. Configure TCP connection to the node (IP:4403)
+3. Add `rest_command` in `configuration.yaml`:
 
 ```yaml
 rest_command:
   telegram_notify:
-    url: "https://api.telegram.org/bot<TU_TOKEN>/sendMessage"
+    url: "https://api.telegram.org/bot<YOUR_TOKEN>/sendMessage"
     method: POST
     content_type: "application/json"
-    payload: '{"chat_id": <TU_CHAT_ID>, "text": "{{ title }}\n{{ message }}", "parse_mode": "HTML"}'
+    payload: '{"chat_id": <YOUR_CHAT_ID>, "text": "{{ title }}\n{{ message }}", "parse_mode": "HTML"}'
 ```
 
-4. Copiar automatizaciones de `homeassistant/automations.yaml`
-5. Reemplazar `XXXX` y `NODEID` con los IDs de tus nodos
+4. Copy automations from `homeassistant/automations.yaml`
+5. Replace `XXXX` and `NODEID` with your actual node IDs
 
-### 4. Bot Telegram
+### 4. Telegram Bot
 
-Integrar `telegram-bot/mesh_command.py` en tu bot. Ajustar `HA_WEBHOOK_URL` a la IP de tu Home Assistant.
+Integrate `telegram-bot/mesh_command.py` into your bot. Adjust `HA_WEBHOOK_URL` to your Home Assistant IP.
 
-## Notas importantes
+## Important Notes
 
-- **Conexión TCP exclusiva**: si HA está conectado al nodo por TCP, la app Meshtastic móvil NO puede conectar simultáneamente. Para usar la app, deshabilitar temporalmente la integración en HA.
-- **MQTT topics**: el nodo publica en `msh/AR/2/json/` (ajustar región según tu ubicación).
-- **Webhook local**: la automatización `mesh_enviar_desde_telegram` usa `local_only: true` — el bot debe correr en la misma red que HA.
+- **Exclusive TCP connection**: if HA is connected to the node via TCP, the Meshtastic mobile app CANNOT connect simultaneously. To use the app, temporarily disable the Meshtastic integration in HA.
+- **MQTT topics**: the node publishes to `msh/AR/2/json/` (adjust region for your location).
+- **Local webhook**: the `mesh_enviar_desde_telegram` automation uses `local_only: true` — the bot must run on the same network as HA.
 
-## Documentación
+## Documentation
 
-- `docs/meshtastic-ha-telegram-guia.pdf` — guía completa con diagramas
-- `ESTADO.md` — estado actual del proyecto y nodos
+- `docs/meshtastic-ha-telegram-guide.pdf` — complete guide with diagrams (English)
+- `docs/meshtastic-ha-telegram-guia.pdf` — guía completa con diagramas (Spanish)
 
-## Hardware usado
+## Hardware Used
 
-- **Gateway fijo**: Seeed XIAO ESP32-S3 (solar)
-- **Nodo móvil**: Heltec V3
+- **Fixed gateway**: Seeed XIAO ESP32-S3 (solar powered)
+- **Mobile node**: Heltec V3
+
+## License
+
+MIT
